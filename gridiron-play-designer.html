@@ -1,0 +1,1715 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1, user-scalable=no" />
+<title>Gridiron — Play Designer</title>
+<link rel="icon" href="data:,">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/react/18.2.0/umd/react.production.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.production.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.23.5/babel.min.js"></script>
+<script src="https://cdn.tailwindcss.com"></script>
+<style>
+  html, body { margin: 0; padding: 0; background: #12140f; }
+  * { box-sizing: border-box; }
+</style>
+</head>
+<body>
+<div id="root"></div>
+<script type="text/babel" data-presets="react">
+const { useState, useRef, useCallback } = React;
+
+
+// ---------- Design tokens ----------
+const COLORS = {
+  bgOuter: "#12140f",
+  clipboardBody: "#cdbf9c",
+  clipboardBodyDark: "#b8a97f",
+  clipboardClip: "#585141",
+  panelBg: "#1a1c16",
+  panelBorder: "#34362a",
+  panelText: "#e9e4d4",
+  fieldDark: "#ffffff",
+  fieldStripe: "#eef0eb",
+  lineChalk: "#161616",
+  losYellow: "#b8860b",
+  offense: "#1c2b4d",
+  offenseText: "#ede6d3",
+  defense: "#9c3320",
+  defenseText: "#f4ebd8",
+  defenseInk: "#7a2a1a",
+  accent: "#b8860b",
+  danger: "#b4432e",
+};
+
+const FIELD_W = 1000;
+const FIELD_H = 650;
+const LOS_Y = 450;
+// Field is scaled so 10 units = 1 yard (matches the 100-unit yard lines).
+// A half-yard grid is therefore 5 units — used for snapping, never drawn.
+const GRID_SIZE = 5;
+const snapToGrid = (v) => Math.round(v / GRID_SIZE) * GRID_SIZE;
+
+const OFFENSE_LABELS = ["WR", "WR", "TE", "RB", "FB", "QB", "LT", "LG", "C", "RG", "RT", "OL"];
+const DEFENSE_LABELS = ["DE", "DT", "DT", "DE", "LB", "LB", "LB", "CB", "CB", "FS", "SS", "DB"];
+const ZONE_MARKER_LABELS = ["1/2", "1/3", "1/4", "Flat", "Deep"];
+const ZONE_MARKER_DEFAULT_W = 150;
+const ZONE_MARKER_DEFAULT_H = 110;
+const ZONE_MARKER_MIN_SIZE = 40;
+const ZONE_MARKER_MAX_SIZE = 420;
+
+const FORMATIONS = {
+  "I-Formation": [
+    { x: 380, y: 450, label: "LT" }, { x: 440, y: 450, label: "LG" }, { x: 500, y: 450, label: "C" },
+    { x: 560, y: 450, label: "RG" }, { x: 620, y: 450, label: "RT" }, { x: 680, y: 450, label: "TE" },
+    { x: 500, y: 490, label: "QB" }, { x: 500, y: 540, label: "FB" }, { x: 500, y: 590, label: "RB" },
+    { x: 100, y: 450, label: "WR" }, { x: 900, y: 450, label: "WR" },
+  ],
+  Shotgun: [
+    { x: 380, y: 450, label: "LT" }, { x: 440, y: 450, label: "LG" }, { x: 500, y: 450, label: "C" },
+    { x: 560, y: 450, label: "RG" }, { x: 620, y: 450, label: "RT" }, { x: 660, y: 450, label: "TE" },
+    { x: 500, y: 560, label: "QB" }, { x: 420, y: 560, label: "RB" },
+    { x: 80, y: 450, label: "WR" }, { x: 780, y: 450, label: "WR" }, { x: 920, y: 450, label: "WR" },
+  ],
+  "Trips Right": [
+    { x: 380, y: 450, label: "LT" }, { x: 440, y: 450, label: "LG" }, { x: 500, y: 450, label: "C" },
+    { x: 560, y: 450, label: "RG" }, { x: 620, y: 450, label: "RT" }, { x: 650, y: 450, label: "TE" },
+    { x: 500, y: 560, label: "QB" }, { x: 420, y: 560, label: "RB" },
+    { x: 100, y: 450, label: "WR" }, { x: 800, y: 450, label: "WR" }, { x: 880, y: 450, label: "WR" },
+  ],
+  Empty: [
+    { x: 380, y: 450, label: "LT" }, { x: 440, y: 450, label: "LG" }, { x: 500, y: 450, label: "C" },
+    { x: 560, y: 450, label: "RG" }, { x: 620, y: 450, label: "RT" }, { x: 650, y: 450, label: "TE" },
+    { x: 500, y: 560, label: "QB" },
+    { x: 80, y: 450, label: "WR" }, { x: 250, y: 450, label: "WR" }, { x: 800, y: 450, label: "WR" }, { x: 920, y: 450, label: "WR" },
+  ],
+};
+
+const DEF_FORMATIONS = {
+  "4-3 Base": [
+    { x: 400, y: 380, label: "DE" }, { x: 460, y: 380, label: "DT" }, { x: 540, y: 380, label: "DT" }, { x: 600, y: 380, label: "DE" },
+    { x: 400, y: 300, label: "LB" }, { x: 500, y: 320, label: "LB" }, { x: 620, y: 300, label: "LB" },
+    { x: 100, y: 380, label: "CB" }, { x: 900, y: 380, label: "CB" },
+    { x: 350, y: 200, label: "FS" }, { x: 650, y: 200, label: "SS" },
+  ],
+  "3-4 Base": [
+    { x: 420, y: 380, label: "DE" }, { x: 500, y: 380, label: "NT" }, { x: 580, y: 380, label: "DE" },
+    { x: 340, y: 310, label: "OLB" }, { x: 460, y: 300, label: "ILB" }, { x: 540, y: 300, label: "ILB" }, { x: 660, y: 310, label: "OLB" },
+    { x: 100, y: 380, label: "CB" }, { x: 900, y: 380, label: "CB" },
+    { x: 350, y: 200, label: "FS" }, { x: 650, y: 200, label: "SS" },
+  ],
+  Nickel: [
+    { x: 400, y: 380, label: "DE" }, { x: 460, y: 380, label: "DT" }, { x: 540, y: 380, label: "NT" }, { x: 600, y: 380, label: "DE" },
+    { x: 460, y: 300, label: "LB" }, { x: 540, y: 300, label: "LB" },
+    { x: 100, y: 380, label: "CB" }, { x: 780, y: 380, label: "CB" }, { x: 900, y: 380, label: "CB" },
+    { x: 350, y: 200, label: "FS" }, { x: 650, y: 200, label: "SS" },
+  ],
+};
+
+const ROUTE_STYLES = {
+  run: { label: "Run", dash: "0", cap: "arrow", team: "offense" },
+  pass: { label: "Route", dash: "0", cap: "arrow", team: "offense" },
+  shift: { label: "Shift", dash: "4 3", cap: "arrow", team: "offense" },
+  motion: { label: "Motion", dash: "10 8", cap: "arrow", team: "offense" },
+  block: { label: "Block", dash: "0", cap: "block", team: "offense" },
+  zoneHalf: { label: "Zone 1/2", dash: "2 7", cap: "zone", zoneText: "1/2", team: "defense", hidden: true },
+  zoneThird: { label: "Zone 1/3", dash: "2 7", cap: "zone", zoneText: "1/3", team: "defense", hidden: true },
+  zoneQuarter: { label: "Zone 1/4", dash: "2 7", cap: "zone", zoneText: "1/4", team: "defense", hidden: true },
+  man: { label: "Man Coverage", dash: "10 8", cap: "arrow", team: "defense", hidden: true },
+  rush: { label: "Pass Rush", dash: "0", cap: "arrow", team: "defense" },
+};
+
+let idCounter = 1;
+const nextId = () => idCounter++;
+
+function useSvgCoords(svgRef) {
+  return useCallback((e) => {
+    const rect = svgRef.current.getBoundingClientRect();
+    const scaleX = FIELD_W / rect.width;
+    const scaleY = FIELD_H / rect.height;
+    return {
+      x: Math.max(20, Math.min(FIELD_W - 20, (e.clientX - rect.left) * scaleX)),
+      y: Math.max(20, Math.min(FIELD_H - 20, (e.clientY - rect.top) * scaleY)),
+    };
+  }, [svgRef]);
+}
+
+// Interpolates a point along a polyline at constant speed for progress t (0..1)
+function pointAtProgress(points, t) {
+  if (!points || points.length === 0) return { x: 0, y: 0 };
+  if (points.length === 1 || t <= 0) return points[0];
+  if (t >= 1) return points[points.length - 1];
+  const segLens = [];
+  let total = 0;
+  for (let i = 1; i < points.length; i++) {
+    const d = Math.hypot(points[i].x - points[i - 1].x, points[i].y - points[i - 1].y);
+    segLens.push(d);
+    total += d;
+  }
+  if (total === 0) return points[0];
+  let target = t * total;
+  for (let i = 0; i < segLens.length; i++) {
+    if (target <= segLens[i] || i === segLens.length - 1) {
+      const segT = segLens[i] === 0 ? 0 : Math.min(1, target / segLens[i]);
+      const p0 = points[i];
+      const p1 = points[i + 1];
+      return { x: p0.x + (p1.x - p0.x) * segT, y: p0.y + (p1.y - p0.y) * segT };
+    }
+    target -= segLens[i];
+  }
+  return points[points.length - 1];
+}
+
+function PlayDesigner() {
+  const svgRef = useRef(null);
+  const getCoords = useSvgCoords(svgRef);
+  const sessionFileInputRef = useRef(null);
+
+  const [players, setPlayers] = useState(() =>
+    FORMATIONS["I-Formation"].map((p) => ({ id: nextId(), team: "offense", ...p }))
+  );
+  const [routes, setRoutes] = useState([]);
+  const [zoneMarkers, setZoneMarkers] = useState([]);
+  const [zoneLinks, setZoneLinks] = useState([]); // {id, playerId, zoneId}
+  const [linkFromId, setLinkFromId] = useState(null);
+  const [manLinks, setManLinks] = useState([]); // {id, defenderId, receiverId}
+  const [manLinkFromId, setManLinkFromId] = useState(null);
+  const [mode, setMode] = useState("move"); // move | addOffense | addDefense | addZone | route | link | manLink
+  const [routeStyle, setRouteStyle] = useState("pass");
+  const [drawingRoute, setDrawingRoute] = useState(null); // {playerId, team, points:[{x,y}]}
+  const [selectedId, setSelectedId] = useState(null);
+  const [selectedZoneId, setSelectedZoneId] = useState(null);
+  const [draggingId, setDraggingId] = useState(null);
+  const [draggingZoneId, setDraggingZoneId] = useState(null);
+  const [resizingZoneId, setResizingZoneId] = useState(null);
+  const [resizingAxis, setResizingAxis] = useState(null); // "w" | "h"
+  const dragStartRef = useRef(null); // {x, y} of the item at the moment a drag begins, for axis locking
+  const [playName, setPlayName] = useState("");
+  const [savedPlays, setSavedPlays] = useState([]);
+  const [addOffCounter, setAddOffCounter] = useState(0);
+  const [addDefCounter, setAddDefCounter] = useState(0);
+  const [addZoneCounter, setAddZoneCounter] = useState(0);
+  const [customLabel, setCustomLabel] = useState("");
+  const [customOffenseFormations, setCustomOffenseFormations] = useState([]);
+  const [customDefenseFormations, setCustomDefenseFormations] = useState([]);
+  const [history, setHistory] = useState([]);
+
+  // Dropdown menu bar state
+  const [openMenu, setOpenMenu] = useState(null); // null | "session" | "tools" | "formations" | "saveFormation"
+  const [toolsRouteTeam, setToolsRouteTeam] = useState(null); // null | "offense" | "defense" (accordion within Tools > Draw Route)
+  const [formationsTeam, setFormationsTeam] = useState(null); // null | "offense" | "defense" (accordion within Formations)
+
+  const closeMenus = () => {
+    setOpenMenu(null);
+    setToolsRouteTeam(null);
+    setFormationsTeam(null);
+  };
+  const toggleMenu = (key) => {
+    setOpenMenu((m) => (m === key ? null : key));
+    setToolsRouteTeam(null);
+    setFormationsTeam(null);
+  };
+
+  // Run Play animation state
+  const SHIFT_MS = 650; // pre-snap shift plays out first
+  const MOTION_MS = 700; // then pre-snap motion
+  const PLAY_MS = 2200; // then the rest of the play develops
+  const TOTAL_RUN_MS = SHIFT_MS + MOTION_MS + PLAY_MS;
+  const MAN_COVERAGE_TIGHTNESS = 0.45; // defenders close to 45% of their original cushion by the end
+  const [isRunning, setIsRunning] = useState(false);
+  const [runElapsedMs, setRunElapsedMs] = useState(0); // 0 = pre-snap, TOTAL_RUN_MS = play fully developed
+  const runActive = runElapsedMs > 0;
+  const runFrameRef = useRef(null);
+
+  const resetRun = () => {
+    if (runFrameRef.current) cancelAnimationFrame(runFrameRef.current);
+    runFrameRef.current = null;
+    setIsRunning(false);
+    setRunElapsedMs(0);
+  };
+
+  const runPlay = () => {
+    closeMenus();
+    setSelectedId(null);
+    setSelectedZoneId(null);
+    setIsRunning(true);
+    const start = performance.now();
+    const step = (now) => {
+      const elapsed = Math.min(TOTAL_RUN_MS, now - start);
+      setRunElapsedMs(elapsed);
+      if (elapsed < TOTAL_RUN_MS) {
+        runFrameRef.current = requestAnimationFrame(step);
+      } else {
+        setIsRunning(false);
+        runFrameRef.current = null;
+      }
+    };
+    runFrameRef.current = requestAnimationFrame(step);
+  };
+
+  // Shift plays out first, then motion, then the snap/route phase begins.
+  const shiftT = Math.min(1, runElapsedMs / SHIFT_MS);
+  const motionT = Math.min(1, Math.max(0, (runElapsedMs - SHIFT_MS) / MOTION_MS));
+  const snapT = Math.min(1, Math.max(0, (runElapsedMs - SHIFT_MS - MOTION_MS) / PLAY_MS));
+
+  // A player's position from their own drawn route(s) alone: Shift plays first, then Motion
+  // (continuing from wherever Shift ended), then a connected main route continues from there.
+  // Returns null if the player has no route at all.
+  const routeBasedPosition = (player) => {
+    const shiftRoute = routes.find((r) => r.playerId === player.id && r.style === "shift");
+    const motionRoute = routes.find((r) => r.playerId === player.id && r.style === "motion");
+    const mainRoute = routes.find((r) => r.playerId === player.id && r.style !== "shift" && r.style !== "motion");
+
+    if (shiftRoute && shiftRoute.points && shiftRoute.points.length > 1 && shiftT < 1) {
+      return pointAtProgress(shiftRoute.points, shiftT);
+    }
+    if (motionRoute && motionRoute.points && motionRoute.points.length > 1) {
+      if (motionT < 1) return pointAtProgress(motionRoute.points, motionT);
+      if (!mainRoute || !mainRoute.points || mainRoute.points.length < 2) {
+        return motionRoute.points[motionRoute.points.length - 1];
+      }
+      return pointAtProgress(mainRoute.points, snapT);
+    }
+    if (shiftRoute && shiftRoute.points && shiftRoute.points.length > 1) {
+      // Shift finished and there's no motion route; hold at shift's end or continue into the main route.
+      if (!mainRoute || !mainRoute.points || mainRoute.points.length < 2) {
+        return shiftRoute.points[shiftRoute.points.length - 1];
+      }
+      return pointAtProgress(mainRoute.points, snapT);
+    }
+    if (mainRoute && mainRoute.points && mainRoute.points.length > 1) {
+      return pointAtProgress(mainRoute.points, snapT);
+    }
+    return null;
+  };
+
+  // Where a player should render given the current run timeline: along its own route(s),
+  // mirroring & closing on a man-coverage assignment, drifting toward a linked zone, or staying put.
+  const getRenderPos = (p) => {
+    if (!runActive) return { x: p.x, y: p.y };
+    const ownPos = routeBasedPosition(p);
+    if (ownPos) return ownPos;
+    const manLink = manLinks.find((l) => l.defenderId === p.id);
+    if (manLink) {
+      const receiver = players.find((pp) => pp.id === manLink.receiverId);
+      if (receiver) {
+        const recPos = routeBasedPosition(receiver) || { x: receiver.x, y: receiver.y };
+        // Mirror the receiver's route shape while gradually closing the cushion between them.
+        const originalOffset = { x: p.x - receiver.x, y: p.y - receiver.y };
+        const scale = 1 - (1 - MAN_COVERAGE_TIGHTNESS) * snapT;
+        return { x: recPos.x + originalOffset.x * scale, y: recPos.y + originalOffset.y * scale };
+      }
+      return { x: p.x, y: p.y };
+    }
+    const zoneLink = zoneLinks.find((l) => l.playerId === p.id);
+    if (zoneLink) {
+      const zone = zoneMarkers.find((z) => z.id === zoneLink.zoneId);
+      if (zone) return { x: p.x + (zone.x - p.x) * snapT, y: p.y + (zone.y - p.y) * snapT };
+    }
+    return { x: p.x, y: p.y };
+  };
+
+  const selectedPlayer = players.find((p) => p.id === selectedId) || null;
+  const selectedZoneMarker = zoneMarkers.find((z) => z.id === selectedZoneId) || null;
+
+  const pushHistory = () => setHistory((h) => [...h, { players, routes, zoneMarkers, zoneLinks, manLinks }].slice(-40));
+  const undo = () => {
+    if (history.length === 0) return;
+    const prev = history[history.length - 1];
+    setPlayers(prev.players);
+    setRoutes(prev.routes);
+    setZoneMarkers(prev.zoneMarkers ?? []);
+    setZoneLinks(prev.zoneLinks ?? []);
+    setManLinks(prev.manLinks ?? []);
+    setHistory((h) => h.slice(0, -1));
+    setSelectedId(null);
+    setSelectedZoneId(null);
+    setDrawingRoute(null);
+  };
+
+  const handleFieldPointerMove = (e) => {
+    // Ctrl locks vertical position (Y fixed, only X moves); Shift locks horizontal position (X fixed, only Y moves).
+    if (draggingId != null) {
+      const { x, y } = getCoords(e);
+      let sx = snapToGrid(x);
+      let sy = snapToGrid(y);
+      if (e.ctrlKey && dragStartRef.current) sy = dragStartRef.current.y;
+      if (e.shiftKey && dragStartRef.current) sx = dragStartRef.current.x;
+      setPlayers((ps) => ps.map((p) => (p.id === draggingId ? { ...p, x: sx, y: sy } : p)));
+    }
+    if (draggingZoneId != null) {
+      const { x, y } = getCoords(e);
+      let sx = snapToGrid(x);
+      let sy = snapToGrid(y);
+      if (e.ctrlKey && dragStartRef.current) sy = dragStartRef.current.y;
+      if (e.shiftKey && dragStartRef.current) sx = dragStartRef.current.x;
+      setZoneMarkers((zs) => zs.map((z) => (z.id === draggingZoneId ? { ...z, x: sx, y: sy } : z)));
+    }
+    if (resizingZoneId != null) {
+      const { x, y } = getCoords(e);
+      setZoneMarkers((zs) =>
+        zs.map((z) => {
+          if (z.id !== resizingZoneId) return z;
+          if (resizingAxis === "h") {
+            const h = Math.round(Math.abs(y - z.y) * 2);
+            return { ...z, h: Math.max(ZONE_MARKER_MIN_SIZE, Math.min(ZONE_MARKER_MAX_SIZE, h)) };
+          }
+          const w = Math.round(Math.abs(x - z.x) * 2);
+          return { ...z, w: Math.max(ZONE_MARKER_MIN_SIZE, Math.min(ZONE_MARKER_MAX_SIZE, w)) };
+        })
+      );
+    }
+  };
+  const handleFieldPointerUp = () => {
+    setDraggingId(null);
+    setDraggingZoneId(null);
+    setResizingZoneId(null);
+    setResizingAxis(null);
+    dragStartRef.current = null;
+  };
+
+  const handleFieldClick = (e) => {
+    if (runActive) return;
+    closeMenus();
+    const { x, y } = getCoords(e);
+    const sx = snapToGrid(x);
+    const sy = snapToGrid(y);
+    if (mode === "addOffense") {
+      pushHistory();
+      const label = customLabel.trim() || OFFENSE_LABELS[addOffCounter % OFFENSE_LABELS.length];
+      setPlayers((ps) => [...ps, { id: nextId(), team: "offense", x: sx, y: sy, label }]);
+      if (!customLabel.trim()) setAddOffCounter((c) => c + 1);
+    } else if (mode === "addDefense") {
+      pushHistory();
+      const label = customLabel.trim() || DEFENSE_LABELS[addDefCounter % DEFENSE_LABELS.length];
+      setPlayers((ps) => [...ps, { id: nextId(), team: "defense", x: sx, y: sy, label }]);
+      if (!customLabel.trim()) setAddDefCounter((c) => c + 1);
+    } else if (mode === "addZone") {
+      pushHistory();
+      const label = customLabel.trim() || ZONE_MARKER_LABELS[addZoneCounter % ZONE_MARKER_LABELS.length];
+      setZoneMarkers((zs) => [...zs, { id: nextId(), x: sx, y: sy, w: ZONE_MARKER_DEFAULT_W, h: ZONE_MARKER_DEFAULT_H, label }]);
+      if (!customLabel.trim()) setAddZoneCounter((c) => c + 1);
+    } else if (mode === "route" && drawingRoute) {
+      setDrawingRoute((r) => ({ ...r, points: [...r.points, { x, y }] }));
+    } else if (mode === "link") {
+      setLinkFromId(null);
+    } else if (mode === "manLink") {
+      setManLinkFromId(null);
+    } else if (mode === "move") {
+      setSelectedId(null);
+      setSelectedZoneId(null);
+    }
+  };
+
+  const startRoute = (player) => {
+    if (mode !== "route") return;
+    const existingShift = routes.find((r) => r.playerId === player.id && r.style === "shift");
+    const existingMotion = routes.find((r) => r.playerId === player.id && r.style === "motion");
+    let startPoint = { x: player.x, y: player.y };
+    if (routeStyle === "motion") {
+      if (existingShift && existingShift.points.length) startPoint = existingShift.points[existingShift.points.length - 1];
+    } else if (routeStyle !== "shift") {
+      if (existingMotion && existingMotion.points.length) startPoint = existingMotion.points[existingMotion.points.length - 1];
+      else if (existingShift && existingShift.points.length) startPoint = existingShift.points[existingShift.points.length - 1];
+    }
+    setDrawingRoute({ playerId: player.id, team: player.team, points: [{ ...startPoint }] });
+  };
+
+  const finishRoute = () => {
+    if (drawingRoute && drawingRoute.points.length > 1) {
+      pushHistory();
+      const s = ROUTE_STYLES[routeStyle];
+      const zoneLabel = s.cap === "zone" ? s.zoneText : undefined;
+      // A player keeps at most one route per category — shift, motion, and everything else (the
+      // main route) — so drawing a new one of the same category replaces the old one, letting a
+      // route pick up cleanly wherever shift/motion left off.
+      const category = routeStyle === "shift" || routeStyle === "motion" ? routeStyle : "main";
+      const categoryOf = (style) => (style === "shift" || style === "motion" ? style : "main");
+      setRoutes((rs) => [
+        ...rs.filter((r) => !(r.playerId === drawingRoute.playerId && categoryOf(r.style) === category)),
+        { id: nextId(), style: routeStyle, zoneLabel, ...drawingRoute },
+      ]);
+    }
+    setDrawingRoute(null);
+  };
+  const cancelRoute = () => setDrawingRoute(null);
+
+  const deleteSelected = () => {
+    if (!selectedId) return;
+    pushHistory();
+    setPlayers((ps) => ps.filter((p) => p.id !== selectedId));
+    setRoutes((rs) => rs.filter((r) => r.playerId !== selectedId));
+    setZoneLinks((zl) => zl.filter((l) => l.playerId !== selectedId));
+    setManLinks((ml) => ml.filter((l) => l.defenderId !== selectedId && l.receiverId !== selectedId));
+    setSelectedId(null);
+  };
+
+  const renameSelected = (label) => {
+    setPlayers((ps) => ps.map((p) => (p.id === selectedId ? { ...p, label } : p)));
+  };
+
+  const renamePlayerByPrompt = (player) => {
+    const input = window.prompt("Rename player", player.label);
+    if (input === null) return; // cancelled
+    const trimmed = input.trim().slice(0, 6);
+    if (!trimmed || trimmed === player.label) {
+      setSelectedId(player.id);
+      return;
+    }
+    pushHistory();
+    setPlayers((ps) => ps.map((p) => (p.id === player.id ? { ...p, label: trimmed } : p)));
+    setMode("move");
+    setSelectedId(player.id);
+  };
+
+  const renameZoneLabelByPrompt = (route) => {
+    const current = route.zoneLabel ?? ROUTE_STYLES[route.style]?.zoneText ?? "";
+    const input = window.prompt("Zone label", current);
+    if (input === null) return; // cancelled
+    const trimmed = input.trim().slice(0, 10);
+    if (!trimmed || trimmed === current) return;
+    pushHistory();
+    setRoutes((rs) => rs.map((r) => (r.id === route.id ? { ...r, zoneLabel: trimmed } : r)));
+  };
+
+  const renameZoneMarkerByPrompt = (marker) => {
+    const input = window.prompt("Zone label", marker.label);
+    if (input === null) return; // cancelled
+    const trimmed = input.trim().slice(0, 10);
+    if (!trimmed || trimmed === marker.label) {
+      setSelectedZoneId(marker.id);
+      return;
+    }
+    pushHistory();
+    setZoneMarkers((zs) => zs.map((z) => (z.id === marker.id ? { ...z, label: trimmed } : z)));
+    setMode("move");
+    setSelectedZoneId(marker.id);
+  };
+
+  const renameSelectedZoneMarker = (label) => {
+    setZoneMarkers((zs) => zs.map((z) => (z.id === selectedZoneId ? { ...z, label } : z)));
+  };
+
+  const resizeSelectedZoneWidth = (w) => {
+    setZoneMarkers((zs) => zs.map((z) => (z.id === selectedZoneId ? { ...z, w: Number(w) } : z)));
+  };
+
+  const resizeSelectedZoneHeight = (h) => {
+    setZoneMarkers((zs) => zs.map((z) => (z.id === selectedZoneId ? { ...z, h: Number(h) } : z)));
+  };
+
+  const deleteSelectedZoneMarker = () => {
+    if (!selectedZoneId) return;
+    pushHistory();
+    setZoneMarkers((zs) => zs.filter((z) => z.id !== selectedZoneId));
+    setZoneLinks((zl) => zl.filter((l) => l.zoneId !== selectedZoneId));
+    setSelectedZoneId(null);
+  };
+
+  const toggleZoneLink = (playerId, zoneId) => {
+    setZoneLinks((zl) => {
+      const exists = zl.some((l) => l.playerId === playerId && l.zoneId === zoneId);
+      if (exists) return zl.filter((l) => !(l.playerId === playerId && l.zoneId === zoneId));
+      return [...zl, { id: nextId(), playerId, zoneId }];
+    });
+  };
+
+  const removeZoneLink = (linkId) => {
+    pushHistory();
+    setZoneLinks((zl) => zl.filter((l) => l.id !== linkId));
+  };
+
+  const toggleManLink = (aId, bId) => {
+    setManLinks((ml) => {
+      const exists = ml.some(
+        (l) => (l.defenderId === aId && l.receiverId === bId) || (l.defenderId === bId && l.receiverId === aId)
+      );
+      if (exists) {
+        return ml.filter((l) => !((l.defenderId === aId && l.receiverId === bId) || (l.defenderId === bId && l.receiverId === aId)));
+      }
+      return [...ml, { id: nextId(), defenderId: aId, receiverId: bId }];
+    });
+  };
+
+  const removeManLink = (linkId) => {
+    pushHistory();
+    setManLinks((ml) => ml.filter((l) => l.id !== linkId));
+  };
+
+  const clearAll = () => {
+    pushHistory();
+    setPlayers([]);
+    setRoutes([]);
+    setZoneMarkers([]);
+    setZoneLinks([]);
+    setManLinks([]);
+    setDrawingRoute(null);
+    setSelectedId(null);
+    setSelectedZoneId(null);
+  };
+
+  const loadOffenseFormation = (template) => {
+    pushHistory();
+    const removedIds = players.filter((p) => p.team === "offense").map((p) => p.id);
+    const preset = template.map((p) => ({ id: nextId(), team: "offense", ...p }));
+    setPlayers((ps) => [...ps.filter((p) => p.team !== "offense"), ...preset]);
+    setRoutes((rs) => rs.filter((r) => r.team !== "offense"));
+    setZoneLinks((zl) => zl.filter((l) => !removedIds.includes(l.playerId)));
+    setManLinks((ml) => ml.filter((l) => !removedIds.includes(l.defenderId) && !removedIds.includes(l.receiverId)));
+    setMode("move");
+    setSelectedId(null);
+    setDrawingRoute(null);
+  };
+
+  const loadDefenseFormation = (template) => {
+    pushHistory();
+    const removedIds = players.filter((p) => p.team === "defense").map((p) => p.id);
+    const preset = template.map((p) => ({ id: nextId(), team: "defense", ...p }));
+    setPlayers((ps) => [...ps.filter((p) => p.team !== "defense"), ...preset]);
+    setRoutes((rs) => rs.filter((r) => r.team !== "defense"));
+    setZoneLinks((zl) => zl.filter((l) => !removedIds.includes(l.playerId)));
+    setManLinks((ml) => ml.filter((l) => !removedIds.includes(l.defenderId) && !removedIds.includes(l.receiverId)));
+    setMode("move");
+    setSelectedId(null);
+    setDrawingRoute(null);
+  };
+
+  const saveCustomOffenseFormation = () => {
+    const snapshot = players.filter((p) => p.team === "offense").map((p) => ({ x: p.x, y: p.y, label: p.label }));
+    if (snapshot.length === 0) {
+      window.alert("There are no offensive players on the field to save.");
+      return;
+    }
+    const name = window.prompt("Name this offense formation");
+    if (name === null) return;
+    const trimmed = name.trim();
+    if (!trimmed) return;
+    setCustomOffenseFormations((cf) => [...cf, { id: nextId(), name: trimmed, players: snapshot }]);
+    closeMenus();
+  };
+
+  const saveCustomDefenseFormation = () => {
+    const snapshot = players.filter((p) => p.team === "defense").map((p) => ({ x: p.x, y: p.y, label: p.label }));
+    if (snapshot.length === 0) {
+      window.alert("There are no defensive players on the field to save.");
+      return;
+    }
+    const name = window.prompt("Name this defense formation");
+    if (name === null) return;
+    const trimmed = name.trim();
+    if (!trimmed) return;
+    setCustomDefenseFormations((cf) => [...cf, { id: nextId(), name: trimmed, players: snapshot }]);
+    closeMenus();
+  };
+
+  const deleteCustomOffenseFormation = (id) => setCustomOffenseFormations((cf) => cf.filter((f) => f.id !== id));
+  const deleteCustomDefenseFormation = (id) => setCustomDefenseFormations((cf) => cf.filter((f) => f.id !== id));
+
+  const saveCurrentPlay = () => {
+    const name = window.prompt("Play name", playName || "");
+    if (name === null) return;
+    const trimmed = name.trim();
+    setPlayName(trimmed);
+    setSavedPlays((sp) => [
+      ...sp,
+      { id: nextId(), name: trimmed || `Untitled Play ${sp.length + 1}`, players, routes, zoneMarkers, zoneLinks, manLinks },
+    ]);
+    closeMenus();
+  };
+
+  const loadPlay = (play) => {
+    pushHistory();
+    setPlayers(play.players.map((p) => ({ ...p })));
+    setRoutes(play.routes.map((r) => ({ ...r })));
+    setZoneMarkers((play.zoneMarkers ?? []).map((z) => ({ ...z })));
+    setZoneLinks((play.zoneLinks ?? []).map((l) => ({ ...l })));
+    setManLinks((play.manLinks ?? []).map((l) => ({ ...l })));
+    setPlayName(play.name);
+    setSelectedId(null);
+    setSelectedZoneId(null);
+    setDrawingRoute(null);
+  };
+
+  const deleteSavedPlay = (id) => setSavedPlays((sp) => sp.filter((p) => p.id !== id));
+
+  // ---------- Whole-session save/open (downloads/reads a .json file) ----------
+  const newSession = () => {
+    if (!window.confirm("Start a new session? This clears the field, saved plays, and custom formations.")) return;
+    pushHistory();
+    setPlayers([]);
+    setRoutes([]);
+    setZoneMarkers([]);
+    setZoneLinks([]);
+    setManLinks([]);
+    setPlayName("");
+    setSavedPlays([]);
+    setCustomOffenseFormations([]);
+    setCustomDefenseFormations([]);
+    setSelectedId(null);
+    setSelectedZoneId(null);
+    setDrawingRoute(null);
+    setLinkFromId(null);
+    setManLinkFromId(null);
+    setMode("move");
+  };
+
+  const saveSession = () => {
+    const session = {
+      gridironSession: true,
+      version: 1,
+      savedAt: new Date().toISOString(),
+      playName,
+      players,
+      routes,
+      zoneMarkers,
+      zoneLinks,
+      manLinks,
+      savedPlays,
+      customOffenseFormations,
+      customDefenseFormations,
+    };
+    const blob = new Blob([JSON.stringify(session, null, 2)], { type: "application/json" });
+    const link = document.createElement("a");
+    const safeName = (playName || "gridiron-session").trim().toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/(^-|-$)/g, "") || "gridiron-session";
+    link.download = `${safeName}-session.json`;
+    link.href = URL.createObjectURL(blob);
+    link.click();
+  };
+
+  const triggerOpenSession = () => sessionFileInputRef.current && sessionFileInputRef.current.click();
+
+  const handleSessionFileChosen = (e) => {
+    const file = e.target.files && e.target.files[0];
+    e.target.value = ""; // allow re-selecting the same file later
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = (evt) => {
+      try {
+        const data = JSON.parse(evt.target.result);
+        pushHistory();
+        setPlayers((data.players ?? []).map((p) => ({ ...p })));
+        setRoutes((data.routes ?? []).map((r) => ({ ...r })));
+        setZoneMarkers((data.zoneMarkers ?? []).map((z) => ({ ...z })));
+        setZoneLinks((data.zoneLinks ?? []).map((l) => ({ ...l })));
+        setManLinks((data.manLinks ?? []).map((l) => ({ ...l })));
+        setPlayName(data.playName ?? "");
+        setSavedPlays((data.savedPlays ?? []).map((p) => ({ ...p })));
+        setCustomOffenseFormations((data.customOffenseFormations ?? []).map((f) => ({ ...f })));
+        setCustomDefenseFormations((data.customDefenseFormations ?? []).map((f) => ({ ...f })));
+        setSelectedId(null);
+        setSelectedZoneId(null);
+        setDrawingRoute(null);
+        setLinkFromId(null);
+        setManLinkFromId(null);
+        setMode("move");
+      } catch (err) {
+        window.alert("Couldn't open this file — it doesn't look like a valid Gridiron session export.");
+      }
+    };
+    reader.readAsText(file);
+  };
+
+  // ---------- Export as image ----------
+  const escXml = (s) => String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+
+  const buildFieldSvgMarkup = (playersArg, routesArg, zoneMarkersArg, zoneLinksArg, manLinksArg, title) => {
+    const header = 56;
+    const totalH = FIELD_H + header;
+    const yLines = [];
+    for (let y = 50; y < FIELD_H; y += 100) yLines.push(y);
+
+    const stripes = yLines
+      .map((y, i) => `<rect x="0" y="${y}" width="${FIELD_W}" height="100" fill="${i % 2 === 0 ? COLORS.fieldStripe : COLORS.fieldDark}" opacity="1"/>`)
+      .join("");
+    const lines = yLines.map((y) => `<line x1="0" y1="${y}" x2="${FIELD_W}" y2="${y}" stroke="${COLORS.lineChalk}" stroke-width="1.5" opacity="0.5"/>`).join("");
+    const hashes = yLines
+      .flatMap((y) => [0.2, 0.8].map((f) => `<line x1="${FIELD_W * f - 8}" y1="${y}" x2="${FIELD_W * f + 8}" y2="${y}" stroke="${COLORS.lineChalk}" stroke-width="2" opacity="0.6"/>`))
+      .join("");
+
+    const zoneMarkersSvg = (zoneMarkersArg || [])
+      .map(
+        (z) =>
+          `<rect x="${z.x - z.w / 2}" y="${z.y - z.h / 2}" width="${z.w}" height="${z.h}" rx="10" fill="${COLORS.defense}" fill-opacity="0.16" stroke="${COLORS.defenseInk}" stroke-width="2" stroke-dasharray="6 5"/>` +
+          `<text x="${z.x}" y="${z.y + 6}" text-anchor="middle" font-size="20" font-family="Oswald, sans-serif" font-weight="700" fill="${COLORS.defenseInk}">${escXml(z.label)}</text>`
+      )
+      .join("");
+
+    const zoneLinksSvg = (zoneLinksArg || [])
+      .map((l) => {
+        const player = (playersArg || []).find((p) => p.id === l.playerId);
+        const zone = (zoneMarkersArg || []).find((z) => z.id === l.zoneId);
+        if (!player || !zone) return "";
+        return `<line x1="${player.x}" y1="${player.y}" x2="${zone.x}" y2="${zone.y}" stroke="${COLORS.accent}" stroke-width="1.5" stroke-dasharray="5 4" opacity="0.6"/>`;
+      })
+      .join("");
+
+    const manLinksSvg = (manLinksArg || [])
+      .map((l) => {
+        const defender = (playersArg || []).find((p) => p.id === l.defenderId);
+        const receiver = (playersArg || []).find((p) => p.id === l.receiverId);
+        if (!defender || !receiver) return "";
+        return `<line x1="${defender.x}" y1="${defender.y}" x2="${receiver.x}" y2="${receiver.y}" stroke="${COLORS.lineChalk}" stroke-width="1.5" stroke-dasharray="3 5" opacity="0.55"/>`;
+      })
+      .join("");
+
+    const routesSvg = routesArg
+      .map((r) => {
+        const s = ROUTE_STYLES[r.style];
+        const d = r.points.map((p, i) => `${i === 0 ? "M" : "L"}${p.x},${p.y}`).join(" ");
+        const stroke = r.team === "offense" ? COLORS.lineChalk : COLORS.defenseInk;
+        const marker = s.cap === "arrow" ? (r.team === "offense" ? ' marker-end="url(#arrow-chalk)"' : ' marker-end="url(#arrow-def)"') : "";
+        const path = `<path d="${d}" fill="none" stroke="${stroke}" stroke-width="${r.style === "pass" || r.style === "rush" ? 2.5 : 3}" stroke-dasharray="${s.dash}" stroke-linecap="round" stroke-linejoin="round" opacity="0.9"${marker}/>`;
+        if (s.cap === "zone" && r.points.length) {
+          const last = r.points[r.points.length - 1];
+          const label = `<text x="${last.x}" y="${last.y - 10}" text-anchor="middle" font-size="18" font-family="Oswald, sans-serif" font-weight="700" fill="${COLORS.defenseInk}">${escXml(r.zoneLabel ?? s.zoneText)}</text>`;
+          return path + label;
+        }
+        return path;
+      })
+      .join("");
+
+    const playersSvg = playersArg
+      .map((p) => {
+        const isOff = p.team === "offense";
+        const shape = isOff
+          ? `<circle r="16" fill="${COLORS.offense}" stroke="${COLORS.lineChalk}" stroke-width="1.5"/>`
+          : `<polygon points="0,-17 15,13 -15,13" fill="${COLORS.defense}" stroke="${COLORS.lineChalk}" stroke-width="1.5" stroke-linejoin="round"/>`;
+        const textY = isOff ? 4 : 8;
+        const fill = isOff ? COLORS.offenseText : COLORS.defenseText;
+        return `<g transform="translate(${p.x},${p.y})">${shape}<text y="${textY}" text-anchor="middle" font-size="${isOff ? 11 : 12}" font-family="Oswald, sans-serif" font-weight="600" fill="${fill}">${escXml(p.label)}</text></g>`;
+      })
+      .join("");
+
+    return `<svg xmlns="http://www.w3.org/2000/svg" width="${FIELD_W}" height="${totalH}" viewBox="0 0 ${FIELD_W} ${totalH}">
+      <rect width="${FIELD_W}" height="${totalH}" fill="${COLORS.bgOuter}"/>
+      <text x="20" y="36" font-family="Oswald, sans-serif" font-size="26" font-weight="700" fill="${COLORS.panelText}">${escXml(title || "Untitled Play")}</text>
+      <g transform="translate(0,${header})">
+        <defs>
+          <marker id="arrow-chalk" markerWidth="10" markerHeight="10" refX="7" refY="3.5" orient="auto"><path d="M0,0 L8,3.5 L0,7 Z" fill="${COLORS.lineChalk}"/></marker>
+          <marker id="arrow-def" markerWidth="10" markerHeight="10" refX="7" refY="3.5" orient="auto"><path d="M0,0 L8,3.5 L0,7 Z" fill="${COLORS.defenseInk}"/></marker>
+        </defs>
+        <rect x="0" y="0" width="${FIELD_W}" height="${FIELD_H}" fill="${COLORS.fieldDark}"/>
+        ${stripes}${lines}${hashes}
+        <line x1="0" y1="${LOS_Y}" x2="${FIELD_W}" y2="${LOS_Y}" stroke="${COLORS.losYellow}" stroke-width="3" opacity="0.85"/>
+        <text x="12" y="${LOS_Y - 8}" fill="${COLORS.losYellow}" font-size="16" font-family="Oswald, sans-serif" opacity="0.85">LOS</text>
+        ${zoneMarkersSvg}
+        ${zoneLinksSvg}
+        ${manLinksSvg}
+        ${routesSvg}
+        ${playersSvg}
+      </g>
+    </svg>`;
+  };
+
+  const exportPlayAsImage = (playersArg, routesArg, zoneMarkersArg, zoneLinksArg, manLinksArg, title) => {
+    const header = 56;
+    const totalH = FIELD_H + header;
+    const svgString = buildFieldSvgMarkup(playersArg, routesArg, zoneMarkersArg, zoneLinksArg, manLinksArg, title);
+    const svgBlob = new Blob([svgString], { type: "image/svg+xml;charset=utf-8" });
+    const url = URL.createObjectURL(svgBlob);
+    const img = new Image();
+    img.onload = () => {
+      const scale = 2;
+      const canvas = document.createElement("canvas");
+      canvas.width = FIELD_W * scale;
+      canvas.height = totalH * scale;
+      const ctx = canvas.getContext("2d");
+      ctx.scale(scale, scale);
+      ctx.fillStyle = COLORS.bgOuter;
+      ctx.fillRect(0, 0, FIELD_W, totalH);
+      ctx.drawImage(img, 0, 0, FIELD_W, totalH);
+      URL.revokeObjectURL(url);
+      canvas.toBlob((blob) => {
+        const link = document.createElement("a");
+        const safeName = (title || "untitled-play").trim().toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/(^-|-$)/g, "") || "untitled-play";
+        link.download = `${safeName}.png`;
+        link.href = URL.createObjectURL(blob);
+        link.click();
+      }, "image/png");
+    };
+    img.src = url;
+  };
+
+
+  const chooseRouteStyle = (key) => {
+    setDrawingRoute(null);
+    setMode("route");
+    setRouteStyle(key);
+    setSelectedId(null);
+    setSelectedZoneId(null);
+    closeMenus();
+  };
+
+  const chooseDefenseTool = (toolMode) => {
+    setDrawingRoute(null);
+    setMode(toolMode);
+    setSelectedId(null);
+    setSelectedZoneId(null);
+    setLinkFromId(null);
+    setManLinkFromId(null);
+    closeMenus();
+  };
+
+  const menuTopStyle = (active) => ({
+    fontFamily: "Oswald, sans-serif",
+    padding: "8px 14px",
+    borderRadius: 6,
+    fontSize: 13,
+    fontWeight: 600,
+    letterSpacing: "0.02em",
+    background: active ? COLORS.accent : "transparent",
+    color: active ? "#1a1c16" : COLORS.panelText,
+    border: "none",
+    cursor: "pointer",
+  });
+
+  const dropdownStyle = {
+    position: "absolute",
+    top: "calc(100% + 4px)",
+    left: 0,
+    minWidth: 200,
+    background: "#20221a",
+    border: `1px solid ${COLORS.panelBorder}`,
+    borderRadius: 8,
+    padding: 6,
+    zIndex: 30,
+    boxShadow: "0 8px 24px rgba(0,0,0,0.5)",
+  };
+
+  const menuDividerStyle = { height: 1, background: COLORS.panelBorder, margin: "4px 2px" };
+
+  const MenuItem = ({ children, onClick, indent = 0, active = false }) => (
+    <button
+      onClick={onClick}
+      className="block w-full text-left"
+      style={{
+        fontFamily: "Inter, sans-serif",
+        fontSize: 13,
+        padding: `7px 10px 7px ${10 + indent * 14}px`,
+        borderRadius: 6,
+        background: active ? "#3a3c2c" : "transparent",
+        color: COLORS.panelText,
+        border: "none",
+        cursor: "pointer",
+      }}
+    >
+      {children}
+    </button>
+  );
+
+  // Yard lines every 100 units (10 yards)
+  const yardLines = [];
+  for (let y = 50; y < FIELD_H; y += 100) {
+    yardLines.push(y);
+  }
+
+  return (
+    <div className="w-full min-h-screen flex flex-col" style={{ background: COLORS.bgOuter }}>
+      <style>{`
+        @import url('https://fonts.googleapis.com/css2?family=Oswald:wght@500;600;700&family=Inter:wght@400;500;600&display=swap');
+        * { box-sizing: border-box; }
+        .pd-scroll::-webkit-scrollbar { width: 8px; }
+        .pd-scroll::-webkit-scrollbar-thumb { background: #40412f; border-radius: 4px; }
+      `}</style>
+
+      {/* Workspace: toolbar on the side, field alongside it */}
+      <div className="flex-1 flex flex-col md:flex-row min-h-0">
+
+      {/* Toolbar */}
+      <aside
+        className="pd-scroll w-full md:w-96 flex-shrink-0 p-4 overflow-y-auto"
+        style={{ background: COLORS.panelBg, borderRight: `1px solid ${COLORS.panelBorder}`, color: COLORS.panelText, fontFamily: "Inter, sans-serif", maxHeight: "100vh" }}
+      >
+        <div className="max-w-3xl mx-auto space-y-5">
+        <div>
+          <h1 style={{ fontFamily: "Oswald, sans-serif", letterSpacing: "0.04em" }} className="text-2xl font-bold uppercase">
+            Gridiron
+          </h1>
+          <p className="text-xs opacity-60 -mt-1">Play Designer</p>
+        </div>
+
+        {/* Menu Bar */}
+        <nav className="flex flex-wrap gap-1 p-1 rounded-lg mb-2" style={{ background: "#12140f", border: `1px solid ${COLORS.panelBorder}` }}>
+          {/* Session */}
+          <div className="relative">
+            <button onClick={() => toggleMenu("session")} style={menuTopStyle(openMenu === "session")}>
+              Session <span style={{ opacity: 0.6 }}>▾</span>
+            </button>
+            {openMenu === "session" && (
+              <div style={dropdownStyle}>
+                <MenuItem onClick={() => { newSession(); closeMenus(); }}>New</MenuItem>
+                <MenuItem onClick={() => { saveSession(); closeMenus(); }}>Save</MenuItem>
+                <MenuItem onClick={() => { triggerOpenSession(); closeMenus(); }}>Open</MenuItem>
+              </div>
+            )}
+          </div>
+
+          {/* Tools */}
+          <div className="relative">
+            <button onClick={() => toggleMenu("tools")} style={menuTopStyle(openMenu === "tools")}>
+              Tools <span style={{ opacity: 0.6 }}>▾</span>
+            </button>
+            {openMenu === "tools" && (
+              <div style={{ ...dropdownStyle, minWidth: 240 }}>
+                <MenuItem active={mode === "move"} onClick={() => { setMode("move"); setDrawingRoute(null); setSelectedId(null); setSelectedZoneId(null); setLinkFromId(null); setManLinkFromId(null); closeMenus(); }}>
+                  Move / Select
+                </MenuItem>
+                <MenuItem active={mode === "addOffense"} onClick={() => { setMode("addOffense"); setDrawingRoute(null); setSelectedId(null); setSelectedZoneId(null); closeMenus(); }}>
+                  + Offense
+                </MenuItem>
+                <MenuItem active={mode === "addDefense"} onClick={() => { setMode("addDefense"); setDrawingRoute(null); setSelectedId(null); setSelectedZoneId(null); closeMenus(); }}>
+                  + Defense
+                </MenuItem>
+                <div style={menuDividerStyle} />
+                <MenuItem onClick={() => setToolsRouteTeam(toolsRouteTeam ? null : "root")}>
+                  Draw Route <span style={{ opacity: 0.6, float: "right" }}>{toolsRouteTeam ? "▾" : "▸"}</span>
+                </MenuItem>
+                {toolsRouteTeam && (
+                  <>
+                    <MenuItem indent={1} onClick={() => setToolsRouteTeam(toolsRouteTeam === "offense" ? "root" : "offense")}>
+                      Offense <span style={{ opacity: 0.6, float: "right" }}>{toolsRouteTeam === "offense" ? "▾" : "▸"}</span>
+                    </MenuItem>
+                    {toolsRouteTeam === "offense" &&
+                      Object.entries(ROUTE_STYLES)
+                        .filter(([, s]) => s.team === "offense" && !s.hidden)
+                        .map(([key, s]) => (
+                          <MenuItem key={key} indent={2} active={mode === "route" && routeStyle === key} onClick={() => chooseRouteStyle(key)}>
+                            {s.label}
+                          </MenuItem>
+                        ))}
+                    <MenuItem indent={1} onClick={() => setToolsRouteTeam(toolsRouteTeam === "defense" ? "root" : "defense")}>
+                      Defense <span style={{ opacity: 0.6, float: "right" }}>{toolsRouteTeam === "defense" ? "▾" : "▸"}</span>
+                    </MenuItem>
+                    {toolsRouteTeam === "defense" && (
+                      <>
+                        {Object.entries(ROUTE_STYLES)
+                          .filter(([, s]) => s.team === "defense" && !s.hidden)
+                          .map(([key, s]) => (
+                            <MenuItem key={key} indent={2} active={mode === "route" && routeStyle === key} onClick={() => chooseRouteStyle(key)}>
+                              {s.label}
+                            </MenuItem>
+                          ))}
+                        <MenuItem indent={2} active={mode === "addZone"} onClick={() => chooseDefenseTool("addZone")}>Add Zone</MenuItem>
+                        <MenuItem indent={2} active={mode === "link"} onClick={() => chooseDefenseTool("link")}>Link to Zone</MenuItem>
+                        <MenuItem indent={2} active={mode === "manLink"} onClick={() => chooseDefenseTool("manLink")}>Man Coverage</MenuItem>
+                      </>
+                    )}
+                  </>
+                )}
+              </div>
+            )}
+          </div>
+
+          {/* Formations */}
+          <div className="relative">
+            <button onClick={() => toggleMenu("formations")} style={menuTopStyle(openMenu === "formations")}>
+              Formations <span style={{ opacity: 0.6 }}>▾</span>
+            </button>
+            {openMenu === "formations" && (
+              <div style={{ ...dropdownStyle, minWidth: 240 }}>
+                <MenuItem onClick={() => setFormationsTeam(formationsTeam === "offense" ? null : "offense")}>
+                  Offense <span style={{ opacity: 0.6, float: "right" }}>{formationsTeam === "offense" ? "▾" : "▸"}</span>
+                </MenuItem>
+                {formationsTeam === "offense" && (
+                  <>
+                    {Object.entries(FORMATIONS).map(([name, template]) => (
+                      <MenuItem key={name} indent={1} onClick={() => { loadOffenseFormation(template); closeMenus(); }}>{name}</MenuItem>
+                    ))}
+                    {customOffenseFormations.map((f) => (
+                      <div key={f.id} className="flex items-center justify-between">
+                        <MenuItem indent={1} onClick={() => { loadOffenseFormation(f.players); closeMenus(); }}>{f.name}</MenuItem>
+                        <button onClick={(e) => { e.stopPropagation(); deleteCustomOffenseFormation(f.id); }} className="px-2 text-xs" style={{ color: COLORS.danger }}>✕</button>
+                      </div>
+                    ))}
+                  </>
+                )}
+                <MenuItem onClick={() => setFormationsTeam(formationsTeam === "defense" ? null : "defense")}>
+                  Defense <span style={{ opacity: 0.6, float: "right" }}>{formationsTeam === "defense" ? "▾" : "▸"}</span>
+                </MenuItem>
+                {formationsTeam === "defense" && (
+                  <>
+                    {Object.entries(DEF_FORMATIONS).map(([name, template]) => (
+                      <MenuItem key={name} indent={1} onClick={() => { loadDefenseFormation(template); closeMenus(); }}>{name}</MenuItem>
+                    ))}
+                    {customDefenseFormations.map((f) => (
+                      <div key={f.id} className="flex items-center justify-between">
+                        <MenuItem indent={1} onClick={() => { loadDefenseFormation(f.players); closeMenus(); }}>{f.name}</MenuItem>
+                        <button onClick={(e) => { e.stopPropagation(); deleteCustomDefenseFormation(f.id); }} className="px-2 text-xs" style={{ color: COLORS.danger }}>✕</button>
+                      </div>
+                    ))}
+                  </>
+                )}
+              </div>
+            )}
+          </div>
+
+          {/* Undo */}
+          <button
+            onClick={() => { undo(); closeMenus(); }}
+            disabled={history.length === 0}
+            style={{ ...menuTopStyle(false), opacity: history.length === 0 ? 0.4 : 1, cursor: history.length === 0 ? "not-allowed" : "pointer" }}
+          >
+            ↺ Undo
+          </button>
+
+          {/* Save Formation */}
+          <div className="relative">
+            <button onClick={() => toggleMenu("saveFormation")} style={menuTopStyle(openMenu === "saveFormation")}>
+              Save Formation <span style={{ opacity: 0.6 }}>▾</span>
+            </button>
+            {openMenu === "saveFormation" && (
+              <div style={dropdownStyle}>
+                <MenuItem onClick={saveCustomOffenseFormation}>Offense</MenuItem>
+                <MenuItem onClick={saveCustomDefenseFormation}>Defense</MenuItem>
+              </div>
+            )}
+          </div>
+
+          {/* Save Play */}
+          <button onClick={saveCurrentPlay} style={menuTopStyle(false)}>
+            Save Play
+          </button>
+
+          {/* Run Play */}
+          {!isRunning && !runActive && (
+            <button onClick={runPlay} style={{ ...menuTopStyle(false), background: COLORS.accent, color: "#1a1c16" }}>
+              ▶ Run Play
+            </button>
+          )}
+          {isRunning && (
+            <button onClick={resetRun} style={{ ...menuTopStyle(false), background: COLORS.danger, color: "#fff" }}>
+              ■ Stop
+            </button>
+          )}
+          {!isRunning && runActive && (
+            <button onClick={resetRun} style={{ ...menuTopStyle(false), background: COLORS.danger, color: "#fff" }}>
+              ↺ Reset Play
+            </button>
+          )}
+        </nav>
+
+        {/* Contextual status / instructions for the active tool */}
+        {runActive && (
+          <section className="mb-2">
+            <h2 className="text-xs uppercase tracking-widest opacity-60 mb-2">{isRunning ? "Running Play…" : "Play Developed"}</h2>
+            <p className="text-xs opacity-70 leading-relaxed">
+              {isRunning
+                ? "Players are moving along their routes, zone assignments, and man coverage."
+                : "The play has finished developing. Tap Reset Play to return everyone to their starting positions and keep editing."}
+            </p>
+          </section>
+        )}
+        {!runActive && (mode === "addOffense" || mode === "addDefense" || mode === "addZone") && (
+          <section className="mb-2">
+            <h2 className="text-xs uppercase tracking-widest opacity-60 mb-2">
+              {mode === "addZone" ? "Zone Label" : "Position Label"}
+            </h2>
+            <input
+              value={customLabel}
+              onChange={(e) => setCustomLabel(e.target.value)}
+              maxLength={10}
+              placeholder={mode === "addZone" ? "e.g. 1/2, Flat, Deep" : "e.g. Mike, Z, WR1"}
+              className="w-full px-2 py-1.5 rounded mb-1 text-sm"
+              style={{ background: "#26281f", border: `1px solid ${COLORS.panelBorder}`, color: COLORS.panelText }}
+            />
+            <p className="text-xs opacity-70 leading-relaxed">
+              {mode === "addZone"
+                ? "Tap the field to drop a zone rectangle. Leave blank to auto-cycle 1/2, 1/3, 1/4, Flat, Deep. Drag its center to move it, or select it in Move / Select to drag the gold width/height handles."
+                : "Tap the field to place a player. Leave blank to auto-cycle standard position labels. Double-click any player to quickly rename it, or hold Ctrl/Shift while dragging to lock its vertical/horizontal position."}
+            </p>
+          </section>
+        )}
+
+        {!runActive && mode === "route" && (
+          <section className="mb-2">
+            <h2 className="text-xs uppercase tracking-widest opacity-60 mb-2">Drawing: {ROUTE_STYLES[routeStyle]?.label}</h2>
+            <p className="text-xs opacity-70 leading-relaxed">
+              Tap a player to start its route, tap the field to add points, then Finish. Change style anytime via Tools › Draw Route. Pre-snap moves chain in order — Shift, then Motion, then any other route — each starting from wherever the previous one ended.
+            </p>
+            {drawingRoute && (
+              <div className="flex gap-2 mt-2">
+                <button onClick={finishRoute} className="flex-1 py-1.5 rounded text-sm font-semibold" style={{ background: COLORS.accent, color: "#1a1c16" }}>
+                  Finish Route
+                </button>
+                <button onClick={cancelRoute} className="flex-1 py-1.5 rounded text-sm font-semibold" style={{ background: COLORS.danger, color: "#fff" }}>
+                  Cancel
+                </button>
+              </div>
+            )}
+          </section>
+        )}
+
+        {!runActive && mode === "link" && (
+          <section className="mb-2">
+            <h2 className="text-xs uppercase tracking-widest opacity-60 mb-2">Link to Zone</h2>
+            <p className="text-xs opacity-70 leading-relaxed">
+              Tap a player, then tap a zone to connect them with a dashed line. Tap the same pair again to disconnect. {linkFromId ? "Now tap a zone." : "Tap a player to begin."}
+            </p>
+            {linkFromId && (
+              <button onClick={() => setLinkFromId(null)} className="mt-2 w-full py-1.5 rounded text-sm font-semibold" style={{ background: COLORS.danger, color: "#fff" }}>
+                Cancel
+              </button>
+            )}
+          </section>
+        )}
+
+        {!runActive && mode === "manLink" && (
+          <section className="mb-2">
+            <h2 className="text-xs uppercase tracking-widest opacity-60 mb-2">Man Coverage</h2>
+            <p className="text-xs opacity-70 leading-relaxed">
+              Tap a defender, then tap the offensive player they're covering to connect them with a dashed line. Tap the same pair again to disconnect. A defender can be linked to more than one receiver (bracket coverage). {manLinkFromId ? "Now tap the offensive player." : "Tap a defender to begin."}
+            </p>
+            {manLinkFromId && (
+              <button onClick={() => setManLinkFromId(null)} className="mt-2 w-full py-1.5 rounded text-sm font-semibold" style={{ background: COLORS.danger, color: "#fff" }}>
+                Cancel
+              </button>
+            )}
+          </section>
+        )}
+
+        {!runActive && mode === "move" && !selectedPlayer && !selectedZoneMarker && (
+          <p className="text-xs opacity-60 mb-2">
+            Tap any player or zone to drag, rename, or delete it. Double-click either anytime to quickly rename it. Hold <b>Ctrl</b> while dragging to lock vertical position, or <b>Shift</b> to lock horizontal position.
+          </p>
+        )}
+
+        {/* Selected player */}
+        {!runActive && mode === "move" && selectedPlayer && (
+          <section className="mb-2">
+            <h2 className="text-xs uppercase tracking-widest opacity-60 mb-2">Selected Player</h2>
+            <input
+              value={selectedPlayer.label}
+              onChange={(e) => renameSelected(e.target.value)}
+              onFocus={pushHistory}
+              maxLength={4}
+              className="w-full px-2 py-1.5 rounded mb-2 text-sm"
+              style={{ background: "#26281f", border: `1px solid ${COLORS.panelBorder}`, color: COLORS.panelText }}
+            />
+            <button onClick={deleteSelected} className="w-full py-1.5 rounded text-sm font-semibold mb-2" style={{ background: COLORS.danger, color: "#fff" }}>
+              Delete Player
+            </button>
+            {manLinks.filter((l) => l.defenderId === selectedPlayer.id || l.receiverId === selectedPlayer.id).length > 0 && (
+              <>
+                <p className="text-xs opacity-60 mb-1">Man coverage</p>
+                <div className="space-y-1">
+                  {manLinks
+                    .filter((l) => l.defenderId === selectedPlayer.id || l.receiverId === selectedPlayer.id)
+                    .map((l) => {
+                      const otherId = l.defenderId === selectedPlayer.id ? l.receiverId : l.defenderId;
+                      const other = players.find((p) => p.id === otherId);
+                      return (
+                        <div key={l.id} className="flex items-center justify-between rounded px-2 py-1" style={{ background: "#26281f", border: `1px solid ${COLORS.panelBorder}` }}>
+                          <span className="text-xs">{other ? other.label : "—"}</span>
+                          <button onClick={() => removeManLink(l.id)} className="px-1.5 text-xs" style={{ color: COLORS.danger }}>✕</button>
+                        </div>
+                      );
+                    })}
+                </div>
+              </>
+            )}
+          </section>
+        )}
+
+        {/* Selected zone */}
+        {!runActive && mode === "move" && selectedZoneMarker && (
+          <section className="mb-2">
+            <h2 className="text-xs uppercase tracking-widest opacity-60 mb-2">Selected Zone</h2>
+            <input
+              value={selectedZoneMarker.label}
+              onChange={(e) => renameSelectedZoneMarker(e.target.value)}
+              onFocus={pushHistory}
+              maxLength={10}
+              className="w-full px-2 py-1.5 rounded mb-2 text-sm"
+              style={{ background: "#26281f", border: `1px solid ${COLORS.panelBorder}`, color: COLORS.panelText }}
+            />
+            <label className="flex items-center justify-between text-xs opacity-70 mb-1">
+              <span>Width</span>
+              <span>{selectedZoneMarker.w}px</span>
+            </label>
+            <input
+              type="range"
+              min={ZONE_MARKER_MIN_SIZE}
+              max={ZONE_MARKER_MAX_SIZE}
+              value={selectedZoneMarker.w}
+              onMouseDown={pushHistory}
+              onTouchStart={pushHistory}
+              onChange={(e) => resizeSelectedZoneWidth(e.target.value)}
+              className="w-full mb-2"
+            />
+            <label className="flex items-center justify-between text-xs opacity-70 mb-1">
+              <span>Height</span>
+              <span>{selectedZoneMarker.h}px</span>
+            </label>
+            <input
+              type="range"
+              min={ZONE_MARKER_MIN_SIZE}
+              max={ZONE_MARKER_MAX_SIZE}
+              value={selectedZoneMarker.h}
+              onMouseDown={pushHistory}
+              onTouchStart={pushHistory}
+              onChange={(e) => resizeSelectedZoneHeight(e.target.value)}
+              className="w-full mb-2"
+            />
+            <button onClick={deleteSelectedZoneMarker} className="w-full py-1.5 rounded text-sm font-semibold mb-2" style={{ background: COLORS.danger, color: "#fff" }}>
+              Delete Zone
+            </button>
+            {zoneLinks.filter((l) => l.zoneId === selectedZoneMarker.id).length > 0 && (
+              <>
+                <p className="text-xs opacity-60 mb-1">Linked players</p>
+                <div className="space-y-1">
+                  {zoneLinks
+                    .filter((l) => l.zoneId === selectedZoneMarker.id)
+                    .map((l) => {
+                      const linkedPlayer = players.find((p) => p.id === l.playerId);
+                      return (
+                        <div key={l.id} className="flex items-center justify-between rounded px-2 py-1" style={{ background: "#26281f", border: `1px solid ${COLORS.panelBorder}` }}>
+                          <span className="text-xs">{linkedPlayer ? linkedPlayer.label : "—"}</span>
+                          <button onClick={() => removeZoneLink(l.id)} className="px-1.5 text-xs" style={{ color: COLORS.danger }}>✕</button>
+                        </div>
+                      );
+                    })}
+                </div>
+              </>
+            )}
+          </section>
+        )}
+
+        {/* Play utilities */}
+        <section className="pt-2 border-t" style={{ borderColor: COLORS.panelBorder }}>
+          <div className="flex items-center justify-between mb-2">
+            <h2 className="text-xs uppercase tracking-widest opacity-60">{playName || "Untitled Play"}</h2>
+            <div className="flex gap-2">
+              <button onClick={() => exportPlayAsImage(players, routes, zoneMarkers, zoneLinks, manLinks, playName)} className="px-2.5 py-1 rounded text-xs font-semibold" style={{ background: "#26281f", border: `1px solid ${COLORS.panelBorder}`, color: COLORS.panelText }}>
+                Export PNG
+              </button>
+              <button onClick={clearAll} className="px-2.5 py-1 rounded text-xs font-semibold" style={{ background: "#26281f", border: `1px solid ${COLORS.panelBorder}`, color: COLORS.panelText }}>
+                Clear Field
+              </button>
+            </div>
+          </div>
+          {savedPlays.length > 0 && (
+            <div className="space-y-1.5">
+              {savedPlays.map((p) => (
+                <div key={p.id} className="flex items-center justify-between rounded px-2 py-1.5" style={{ background: "#26281f", border: `1px solid ${COLORS.panelBorder}` }}>
+                  <span className="text-sm truncate mr-2">{p.name}</span>
+                  <div className="flex gap-1 flex-shrink-0">
+                    <button onClick={() => loadPlay(p)} className="px-2 py-0.5 rounded text-xs" style={{ background: COLORS.accent, color: "#1a1c16" }}>Load</button>
+                    <button onClick={() => exportPlayAsImage(p.players, p.routes, p.zoneMarkers, p.zoneLinks, p.manLinks, p.name)} className="px-2 py-0.5 rounded text-xs" style={{ background: "#33352a", border: `1px solid ${COLORS.panelBorder}`, color: COLORS.panelText }}>PNG</button>
+                    <button onClick={() => deleteSavedPlay(p.id)} className="px-2 py-0.5 rounded text-xs" style={{ background: COLORS.danger, color: "#fff" }}>✕</button>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </section>
+
+        <input
+          ref={sessionFileInputRef}
+          type="file"
+          accept="application/json,.json"
+          onChange={handleSessionFileChosen}
+          style={{ display: "none" }}
+        />
+        </div>
+      </aside>
+
+      {/* Field */}
+      <main className="flex-1 flex items-center justify-center p-4 md:p-10 overflow-y-auto">
+        <div
+          className="relative w-full max-w-3xl rounded-2xl shadow-2xl p-4 md:p-6"
+          style={{ background: COLORS.clipboardBody, border: `1px solid ${COLORS.clipboardBodyDark}` }}
+        >
+          {/* Clip */}
+          <div
+            className="absolute -top-4 left-1/2 -translate-x-1/2 rounded-md"
+            style={{ width: 90, height: 28, background: COLORS.clipboardClip, boxShadow: "0 3px 6px rgba(0,0,0,0.4)" }}
+          />
+          <div
+            className="absolute -top-1.5 left-1/2 -translate-x-1/2 rounded-full"
+            style={{ width: 22, height: 22, background: "#3d3a2f", boxShadow: "inset 0 0 3px rgba(0,0,0,0.6)" }}
+          />
+
+          <div className="flex items-center justify-between mb-3 px-1">
+            <span style={{ fontFamily: "Oswald, sans-serif", color: "#3a3527" }} className="text-sm font-semibold uppercase tracking-wide">
+              {playName || "Untitled Play"}
+            </span>
+            <span style={{ fontFamily: "Inter, sans-serif", color: "#5a543f" }} className="text-xs">
+              {players.filter((p) => p.team === "offense").length} OFF · {players.filter((p) => p.team === "defense").length} DEF
+            </span>
+          </div>
+
+          <svg
+            ref={svgRef}
+            viewBox={`0 0 ${FIELD_W} ${FIELD_H}`}
+            className="w-full rounded-lg touch-none"
+            style={{ background: COLORS.fieldDark, cursor: mode === "move" ? "default" : "crosshair" }}
+            onPointerMove={handleFieldPointerMove}
+            onPointerUp={handleFieldPointerUp}
+            onPointerLeave={handleFieldPointerUp}
+            onClick={handleFieldClick}
+          >
+            <defs>
+              <marker id="arrow-chalk" markerWidth="10" markerHeight="10" refX="7" refY="3.5" orient="auto">
+                <path d="M0,0 L8,3.5 L0,7 Z" fill={COLORS.lineChalk} />
+              </marker>
+              <marker id="arrow-def" markerWidth="10" markerHeight="10" refX="7" refY="3.5" orient="auto">
+                <path d="M0,0 L8,3.5 L0,7 Z" fill={COLORS.defenseInk} />
+              </marker>
+              <pattern id="halfYardGrid" width={GRID_SIZE} height={GRID_SIZE} patternUnits="userSpaceOnUse">
+                <path d={`M ${GRID_SIZE} 0 L 0 0 0 ${GRID_SIZE}`} fill="none" stroke={COLORS.accent} strokeWidth={0.5} />
+              </pattern>
+            </defs>
+
+            {/* stripes */}
+            {yardLines.map((y, i) => (
+              <rect key={`s${i}`} x={0} y={y} width={FIELD_W} height={100} fill={i % 2 === 0 ? COLORS.fieldStripe : COLORS.fieldDark} opacity={1} />
+            ))}
+            {/* yard lines */}
+            {yardLines.map((y, i) => (
+              <line key={`l${i}`} x1={0} y1={y} x2={FIELD_W} y2={y} stroke={COLORS.lineChalk} strokeWidth={1.5} opacity={0.5} />
+            ))}
+            {/* hash marks */}
+            {yardLines.map((y, i) =>
+              [0.2, 0.8].map((f, j) => (
+                <line key={`h${i}${j}`} x1={FIELD_W * f - 8} y1={y} x2={FIELD_W * f + 8} y2={y} stroke={COLORS.lineChalk} strokeWidth={2} opacity={0.6} />
+              ))
+            )}
+            {/* LOS */}
+            <line x1={0} y1={LOS_Y} x2={FIELD_W} y2={LOS_Y} stroke={COLORS.losYellow} strokeWidth={3} opacity={0.85} />
+            <text x={12} y={LOS_Y - 8} fill={COLORS.losYellow} fontSize={16} fontFamily="Oswald, sans-serif" opacity={0.85}>LOS</text>
+
+            {/* half-yard snap grid, only while actively dragging a player or zone */}
+            {(draggingId != null || draggingZoneId != null || resizingZoneId != null) && (
+              <rect x={0} y={0} width={FIELD_W} height={FIELD_H} fill="url(#halfYardGrid)" opacity={0.35} pointerEvents="none" />
+            )}
+
+            {/* player ↔ zone links */}
+            {zoneLinks.map((l) => {
+              const player = players.find((p) => p.id === l.playerId);
+              const zone = zoneMarkers.find((z) => z.id === l.zoneId);
+              if (!player || !zone) return null;
+              return (
+                <line
+                  key={l.id}
+                  x1={player.x}
+                  y1={player.y}
+                  x2={zone.x}
+                  y2={zone.y}
+                  stroke={COLORS.accent}
+                  strokeWidth={1.5}
+                  strokeDasharray="5 4"
+                  opacity={0.6}
+                  pointerEvents="none"
+                />
+              );
+            })}
+
+            {/* man coverage links */}
+            {manLinks.map((l) => {
+              const defender = players.find((p) => p.id === l.defenderId);
+              const receiver = players.find((p) => p.id === l.receiverId);
+              if (!defender || !receiver) return null;
+              return (
+                <line
+                  key={l.id}
+                  x1={defender.x}
+                  y1={defender.y}
+                  x2={receiver.x}
+                  y2={receiver.y}
+                  stroke={COLORS.lineChalk}
+                  strokeWidth={1.5}
+                  strokeDasharray="3 5"
+                  opacity={0.55}
+                  pointerEvents="none"
+                />
+              );
+            })}
+
+            {/* zone coverage areas */}
+            {zoneMarkers.map((z) => {
+              const isSel = z.id === selectedZoneId;
+              return (
+                <g key={z.id}>
+                  <rect
+                    x={z.x - z.w / 2}
+                    y={z.y - z.h / 2}
+                    width={z.w}
+                    height={z.h}
+                    rx={10}
+                    fill={COLORS.defense}
+                    fillOpacity={0.16}
+                    stroke={COLORS.defenseInk}
+                    strokeWidth={2}
+                    strokeDasharray="6 5"
+                    onPointerDown={(e) => {
+                      e.stopPropagation();
+                      if (runActive) return;
+                      if (mode === "move") {
+                        pushHistory();
+                        dragStartRef.current = { x: z.x, y: z.y };
+                        setDraggingZoneId(z.id);
+                        setSelectedZoneId(z.id);
+                      } else if (mode === "link" && linkFromId) {
+                        pushHistory();
+                        toggleZoneLink(linkFromId, z.id);
+                      }
+                    }}
+                    onClick={(e) => e.stopPropagation()}
+                    onDoubleClick={(e) => {
+                      e.stopPropagation();
+                      if (runActive) return;
+                      renameZoneMarkerByPrompt(z);
+                    }}
+                    style={{ cursor: mode === "move" ? "grab" : mode === "link" ? "pointer" : "default" }}
+                  />
+                  <text
+                    x={z.x}
+                    y={z.y + 6}
+                    textAnchor="middle"
+                    fontSize={20}
+                    fontFamily="Oswald, sans-serif"
+                    fontWeight={700}
+                    fill={COLORS.defenseInk}
+                    pointerEvents="none"
+                  >
+                    {z.label}
+                  </text>
+                  {isSel && mode === "move" && (
+                    <>
+                      <rect x={z.x - z.w / 2} y={z.y - z.h / 2} width={z.w} height={z.h} rx={10} fill="none" stroke={COLORS.accent} strokeWidth={2} strokeDasharray="3 3" pointerEvents="none" />
+                      <circle
+                        cx={z.x + z.w / 2}
+                        cy={z.y}
+                        r={10}
+                        fill={COLORS.accent}
+                        stroke={COLORS.panelBg}
+                        strokeWidth={2}
+                        onPointerDown={(e) => {
+                          e.stopPropagation();
+                          pushHistory();
+                          setResizingZoneId(z.id);
+                          setResizingAxis("w");
+                        }}
+                        style={{ cursor: "ew-resize" }}
+                      />
+                      <circle
+                        cx={z.x}
+                        cy={z.y + z.h / 2}
+                        r={10}
+                        fill={COLORS.accent}
+                        stroke={COLORS.panelBg}
+                        strokeWidth={2}
+                        onPointerDown={(e) => {
+                          e.stopPropagation();
+                          pushHistory();
+                          setResizingZoneId(z.id);
+                          setResizingAxis("h");
+                        }}
+                        style={{ cursor: "ns-resize" }}
+                      />
+                    </>
+                  )}
+                </g>
+              );
+            })}
+
+            {/* finalized routes */}
+            {routes.map((r) => {
+              const s = ROUTE_STYLES[r.style];
+              const pathD = r.points.map((p, i) => `${i === 0 ? "M" : "L"}${p.x},${p.y}`).join(" ");
+              const stroke = r.team === "offense" ? COLORS.lineChalk : COLORS.defenseInk;
+              const marker = s.cap === "arrow" ? (r.team === "offense" ? "url(#arrow-chalk)" : "url(#arrow-def)") : undefined;
+              const last = r.points[r.points.length - 1];
+              return (
+                <React.Fragment key={r.id}>
+                  <path
+                    d={pathD}
+                    fill="none"
+                    stroke={stroke}
+                    strokeWidth={r.style === "pass" || r.style === "rush" ? 2.5 : 3}
+                    strokeDasharray={s.dash}
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    markerEnd={marker}
+                    opacity={0.9}
+                  />
+                  {s.cap === "zone" && last && (
+                    <g
+                      onDoubleClick={(e) => {
+                        e.stopPropagation();
+                        renameZoneLabelByPrompt(r);
+                      }}
+                      style={{ cursor: "pointer" }}
+                    >
+                      <circle cx={last.x} cy={last.y - 14} r={16} fill="transparent" />
+                      <text
+                        x={last.x}
+                        y={last.y - 10}
+                        textAnchor="middle"
+                        fontSize={18}
+                        fontFamily="Oswald, sans-serif"
+                        fontWeight={700}
+                        fill={COLORS.defenseInk}
+                      >
+                        {r.zoneLabel ?? s.zoneText}
+                      </text>
+                    </g>
+                  )}
+                </React.Fragment>
+              );
+            })}
+
+            {/* route being drawn */}
+            {drawingRoute && (
+              <polyline
+                points={drawingRoute.points.map((p) => `${p.x},${p.y}`).join(" ")}
+                fill="none"
+                stroke={COLORS.accent}
+                strokeWidth={2.5}
+                strokeDasharray="4 4"
+                strokeLinecap="round"
+              />
+            )}
+            {drawingRoute &&
+              drawingRoute.points.map((p, i) => (
+                <circle key={i} cx={p.x} cy={p.y} r={4} fill={COLORS.accent} />
+              ))}
+
+            {/* players */}
+            {players.map((p) => {
+              const isOff = p.team === "offense";
+              const isSelected = p.id === selectedId;
+              const isLinkFrom = p.id === linkFromId;
+              const isManLinkFrom = p.id === manLinkFromId;
+              const renderPos = getRenderPos(p);
+              return (
+                <g
+                  key={p.id}
+                  transform={`translate(${renderPos.x},${renderPos.y})`}
+                  onPointerDown={(e) => {
+                    e.stopPropagation();
+                    if (runActive) return;
+                    if (mode === "move") {
+                      pushHistory();
+                      dragStartRef.current = { x: p.x, y: p.y };
+                      setDraggingId(p.id);
+                      setSelectedId(p.id);
+                    } else if (mode === "route") {
+                      startRoute(p);
+                    } else if (mode === "link") {
+                      setLinkFromId(p.id);
+                    } else if (mode === "manLink") {
+                      if (!manLinkFromId) {
+                        setManLinkFromId(p.id);
+                      } else if (manLinkFromId === p.id) {
+                        setManLinkFromId(null);
+                      } else {
+                        pushHistory();
+                        toggleManLink(manLinkFromId, p.id);
+                      }
+                    }
+                  }}
+                  onClick={(e) => e.stopPropagation()}
+                  onDoubleClick={(e) => {
+                    e.stopPropagation();
+                    if (runActive) return;
+                    renamePlayerByPrompt(p);
+                  }}
+                  style={{ cursor: mode === "move" ? "grab" : "pointer" }}
+                >
+                  {isSelected && <circle r={22} fill="none" stroke={COLORS.accent} strokeWidth={2} strokeDasharray="3 3" />}
+                  {(isLinkFrom || isManLinkFrom) && <circle r={24} fill="none" stroke={COLORS.accent} strokeWidth={3} />}
+                  {isOff ? (
+                    <circle r={16} fill={COLORS.offense} stroke={COLORS.lineChalk} strokeWidth={1.5} />
+                  ) : (
+                    <polygon
+                      points="0,-17 15,13 -15,13"
+                      fill={COLORS.defense}
+                      stroke={COLORS.lineChalk}
+                      strokeWidth={1.5}
+                      strokeLinejoin="round"
+                    />
+                  )}
+                  <text
+                    y={isOff ? 4 : 8}
+                    textAnchor="middle"
+                    fontSize={isOff ? 11 : 12}
+                    fontFamily="Oswald, sans-serif"
+                    fontWeight={600}
+                    fill={isOff ? COLORS.offenseText : COLORS.defenseText}
+                  >
+                    {p.label}
+                  </text>
+                </g>
+              );
+            })}
+          </svg>
+        </div>
+      </main>
+      </div>
+
+      {/* Key */}
+      <footer
+        className="w-full p-4"
+        style={{ background: COLORS.panelBg, borderTop: `1px solid ${COLORS.panelBorder}`, color: COLORS.panelText, fontFamily: "Inter, sans-serif" }}
+      >
+        <div className="max-w-3xl mx-auto text-xs opacity-70 leading-relaxed">
+          <h2 className="text-xs uppercase tracking-widest opacity-60 mb-2" style={{ fontFamily: "Oswald, sans-serif" }}>Key</h2>
+          <div className="flex flex-wrap gap-x-6 gap-y-2">
+            <div className="flex items-center gap-2">
+              <span style={{ width: 12, height: 12, borderRadius: "50%", background: COLORS.offense, display: "inline-block" }} /> Offense
+              <span style={{ width: 0, height: 0, borderLeft: "6px solid transparent", borderRight: "6px solid transparent", borderBottom: `11px solid ${COLORS.defense}`, display: "inline-block", marginLeft: 6 }} /> Defense
+            </div>
+            <div className="flex items-center gap-2">
+              <span style={{ width: 22, height: 14, borderRadius: 3, background: "#f2efe4", border: `1.5px dashed ${COLORS.defenseInk}`, display: "inline-block" }} />
+              Zone (drag to move, gold handles to resize)
+            </div>
+            <div className="flex items-center gap-2"><span style={{ width: 22, height: 2, background: COLORS.accent, display: "inline-block", borderTop: `2px dashed ${COLORS.accent}` }} />Player ↔ Zone Link</div>
+            <div className="flex items-center gap-2">
+              <span style={{ width: 22, height: 14, borderRadius: 2, background: "#f2efe4", display: "inline-flex", alignItems: "center", justifyContent: "center" }}>
+                <span style={{ width: 16, borderTop: `2px dotted ${COLORS.lineChalk}` }} />
+              </span>
+              Man Coverage Link
+            </div>
+            <div className="flex items-center gap-2">
+              <span style={{ width: 22, height: 14, borderRadius: 2, background: "#f2efe4", display: "inline-flex", alignItems: "center", justifyContent: "center" }}>
+                <span style={{ width: 16, height: 2, background: COLORS.lineChalk, display: "block" }} />
+              </span>
+              Run / Route (arrow)
+            </div>
+            <div className="flex items-center gap-2">
+              <span style={{ width: 22, height: 14, borderRadius: 2, background: "#f2efe4", display: "inline-flex", alignItems: "center", justifyContent: "center" }}>
+                <span style={{ width: 16, borderTop: `2px dashed ${COLORS.lineChalk}` }} />
+              </span>
+              Shift (dashed, before Motion)
+            </div>
+            <div className="flex items-center gap-2">
+              <span style={{ width: 22, height: 14, borderRadius: 2, background: "#f2efe4", display: "inline-flex", alignItems: "center", justifyContent: "center" }}>
+                <span style={{ width: 16, borderTop: `2px dashed ${COLORS.lineChalk}` }} />
+              </span>
+              Motion (dashed)
+            </div>
+            <div className="flex items-center gap-2">
+              <span style={{ width: 22, height: 14, borderRadius: 2, background: "#f2efe4", display: "inline-flex", alignItems: "center", justifyContent: "center" }}>
+                <span style={{ width: 16, height: 2, background: COLORS.lineChalk, display: "block" }} />
+              </span>
+              Block (flat end)
+            </div>
+            <div className="flex items-center gap-2">
+              <span style={{ width: 22, height: 14, borderRadius: 2, background: "#f2efe4", display: "inline-flex", alignItems: "center", justifyContent: "center" }}>
+                <span style={{ width: 16, height: 2, background: COLORS.defenseInk, display: "block" }} />
+              </span>
+              Pass Rush (arrow)
+            </div>
+          </div>
+        </div>
+      </footer>
+    </div>
+  );
+}
+
+const root = ReactDOM.createRoot(document.getElementById('root'));
+root.render(<PlayDesigner />);
+</script>
+</body>
+</html>
